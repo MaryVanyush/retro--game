@@ -10,6 +10,7 @@ import Vampire from './characters/Vampire';
 import PositionedCharacter from './PositionedCharacter';
 import GamePlay from "./GamePlay";
 import GameState from "./GameState";
+
 import Mathematic from "./Mathematic";
 import { isStepPossible, isPossibleStepsIndex } from "./isStepPossible";
 
@@ -26,93 +27,147 @@ export default class GameController {
     this.mouseEnterCell = null;
     this.possibleStep = null;
     this.possibleAttack = null;
+    this.numberOfCharacters = 2;
     this.gameState = new GameState();
 
     this.setEventOnCell = this.setEventOnCell.bind(this);
+    this.toNewGame = this.toNewGame.bind(this);
     this.onCellClick = this.onCellClick.bind(this);
     this.onCellEnter = this.onCellEnter.bind(this);
     this.onCellLeave = this.onCellLeave.bind(this);
     this.toMouseenterCell = this.toMouseenterCell.bind(this);
     this.resetOptions = this.resetOptions.bind(this);
     this.toStepOfOpponent = this.toStepOfOpponent.bind(this);
+    this.checkPosition = this.checkPosition.bind(this);
     this.toAttacPlayer = this.toAttacPlayer.bind(this);
     this.toCharacterRemove = this.toCharacterRemove.bind(this);
     this.levelUp = this.levelUp.bind(this);
+    this.toSaveGame = this.toSaveGame.bind(this);
+    this.toLoadGame = this.toLoadGame.bind(this);
   }
 
-  init() {
+  async init() {
+    await this.gamePlay.drawUi(themes.prairie);
+    await this.generateTeams(1, this.numberOfCharacters);
+    await this.setEventOnCell();
+  }
+
+  toNewGame(){
+    this.positionsTeams = [];
+    this.positions = [];
+    this.team = null;
+    this.opponent = null;
+    this.selectedCellIndex = null;
+    this.selectedCharacter = null;
+    this.mouseEnterCell = null;
+    this.possibleStep = null;
+    this.possibleAttack = null;
+    this.numberOfCharacters = 2;
+    this.gameState = new GameState();
     this.gamePlay.drawUi(themes.prairie);
-    this.generateTeams(1, 4);
-    this.setEventOnCell();
+    this.generateTeams(1, this.numberOfCharacters);
+  }
+
+  async levelUpInit() {
+    const themeKeys = Object.keys(themes);
+    const currentTheme = themes[themeKeys[this.gameState.level - 1]];
+    await this.gamePlay.drawUi(currentTheme);
+    await this.generateTeams(1, this.numberOfCharacters);
+  }
+
+  toSaveGame(){
+    this.gameState.gameStateService.save({positionsTeams: this.positionsTeams, level: this.gameState.level});
+  }
+
+  toLoadGame(){
+    const state = this.gameState.load();
+    this.positionsTeams = state.positionsTeams;
+    this.gameState.level = state.level;
+    const themeKeys = Object.keys(themes);
+    const currentTheme = themes[themeKeys[this.gameState.level - 1]];
+    this.gamePlay.drawUi(currentTheme);
+    this.gamePlay.redrawPositions(this.positionsTeams);
   }
 
   setEventOnCell() {
+    this.gamePlay.addNewGameListener(this.toNewGame)
+    this.gamePlay.addSaveGameListener(this.toSaveGame);
+    this.gamePlay.addLoadGameListener(this.toLoadGame);
     this.gamePlay.addCellEnterListener(this.onCellEnter);
     this.gamePlay.addCellLeaveListener(this.onCellLeave);
     this.gamePlay.addCellClickListener(this.onCellClick);
   }
 
-  onCellClick(index) {
+  async handlePossibleStep(index) {
+    this.positionsTeams = this.positionsTeams.filter(char => char.position !== this.selectedCellIndex);
+    this.selectedCharacter.position = index;
+    this.positionsTeams.push(this.selectedCharacter);
+    await this.gamePlay.redrawPositions(this.positionsTeams);
+    await this.gamePlay.deselectCell(this.selectedCellIndex);
+    await this.gamePlay.deselectCell(this.mouseEnterCell);
+    await this.resetOptions();
+    await this.gameState.сhangeСurrentPlayer();
+    await this.toStepOfOpponent()
+  }
+  
+  async handlePossibleAttack(index, character) {
     let playerCharacters = ['bowman', 'swordsman', 'magician'];
-    index = this.gamePlay.cells.indexOf(event.currentTarget);
-    const character = this.positionsTeams.find(char => char.position === index);
-    if(this.possibleStep !== null) {
-      this.positionsTeams = this.positionsTeams.filter(char => char.position !== this.selectedCellIndex);
-      this.selectedCharacter.position = index;
-      this.positionsTeams.push(this.selectedCharacter);
+    const attacker = this.selectedCharacter.character
+    const damage =  Number((Math.max(attacker.attack - character.character.defence, attacker.attack * 0.1)).toFixed(1));
+    await this.gamePlay.showDamage(index, damage).then(() => {
+      character.character.health = character.character.health - damage
       this.gamePlay.redrawPositions(this.positionsTeams);
       this.gamePlay.deselectCell(this.selectedCellIndex);
       this.gamePlay.deselectCell(this.mouseEnterCell);
+      if(character.character.health <= 0){
+        this.toCharacterRemove(character);
+      }
+      let opponentTeam = [];
+      opponentTeam = this.positionsTeams.filter(char => !playerCharacters.includes(char.character.type));
       this.resetOptions();
-      this.gameState.сhangeСurrentPlayer();
-      this.toStepOfOpponent()
-      return;
-    }
-    if(this.possibleAttack !== null) {
-      const attacker = this.selectedCharacter.character
-      const damage =  Math.max(attacker.attack - character.character.defence, attacker.attack * 0.1);
-      // после моей аттаки в момент анимации иногда зависает___________________________________________________________________________________________
-      this.gamePlay.showDamage(index, damage).then(() => {
-        character.character.health = character.character.health - damage
-        this.gamePlay.redrawPositions(this.positionsTeams);
-        this.gamePlay.deselectCell(this.selectedCellIndex);
-        this.gamePlay.deselectCell(this.mouseEnterCell);
-        if(character.character.health <= 0){
-          this.toCharacterRemove(character);
-        }
-        let opponentTeam = [];
-        opponentTeam = this.positionsTeams.filter(char => !playerCharacters.includes(char.character.type));
-        this.resetOptions();
-        // let playerTeam = [];
-        // playerTeam = this.positionsTeams.filter(char => playerCharacters.includes(char.character.type));
-        // if(playerTeam.length === 0){
-        //   alert('Game Over')            эта логика должна быть после атаки противника
-        //   return;
-        // } 
-        if(opponentTeam.length === 0){
-          this.levelUp(this.positionsTeams);
-          return;
+      if(opponentTeam.length === 0){
+        this.levelUp(this.positionsTeams);
+        return;
         }
         this.gameState.сhangeСurrentPlayer();
         this.toStepOfOpponent();
-      })
+      });
+  }
+
+  async onCellClick(index) {
+    let playerCharacters = ['bowman', 'swordsman', 'magician'];
+    let playersTeam = [];
+    playersTeam = this.positionsTeams.filter(char => playerCharacters.includes(char.character.type));
+    if(playersTeam.length === 0){
+      return;
+    }
+    index = this.gamePlay.cells.indexOf(event.currentTarget);
+    const character = this.positionsTeams.find(char => char.position === index);
+    if(this.possibleStep !== null) {
+      await this.handlePossibleStep(index);
+      this.selectedCellIndex = null;
+      return;
+    }
+    if(this.possibleAttack !== null) {
+      await this.handlePossibleAttack(index, character);
+      this.selectedCellIndex = null;
       return;
     }
     if (!character){
-      GamePlay.showError("there is no player in this cell");
+      await GamePlay.showError("there is no player in this cell");
       return;
     };
     if (!playerCharacters.includes(character.character.type)){
-      GamePlay.showError("this is not your character");
+      await GamePlay.showError("this is not your character");
       return;
     }
     if (this.selectedCellIndex !== null) {
-      this.gamePlay.deselectCell(this.selectedCellIndex);
+      await this.gamePlay.deselectCell(this.selectedCellIndex);
     }
-    this.gamePlay.selectCell(index);
+    await this.gamePlay.selectCell(index);
     this.selectedCellIndex = character.position;
     this.selectedCharacter = character;
-    this.toMouseenterCell();
+    await this.toMouseenterCell();
   }
 
   toStepOfOpponent(){
@@ -168,11 +223,11 @@ export default class GameController {
     }
   }
 
-  toAttacPlayer(index, opponent){
+  async toAttacPlayer(index, opponent){
     const player = this.positionsTeams.filter(char => char.position === index);
     const attacker = opponent.character
-    const damage =  Math.max(attacker.attack - player[0].character.defence, attacker.attack * 0.1);
-    this.gamePlay.showDamage(player[0].position, damage).then(() => {
+    const damage =  Number((Math.max(attacker.attack - player[0].character.defence, attacker.attack * 0.1)).toFixed(1));
+    await this.gamePlay.showDamage(player[0].position, damage).then(() => {
       player[0].character.health = player[0].character.health - damage
       this.gamePlay.redrawPositions(this.positionsTeams);
       if(player[0].character.health <= 0){
@@ -182,15 +237,23 @@ export default class GameController {
   })
   }
 
-  // иногда попадает на одну ту же клетку с другим игроком-не проверяет на позицию других участников----------------------------------------------------------
+  checkPosition(index){
+    let positions = [];
+    this.positionsTeams.forEach( char => {
+      positions.push(char.position)
+    })
+    if(positions.includes(index)){
+      return false;
+    } else {
+      return true;
+    }
+  }
+
   async generateOpponentPosition (possibleStepsIndex, position, maxDistance) {
-    let randomIndex = Math.floor(Math.random() * possibleStepsIndex.length);
-      while(!isStepPossible(position, randomIndex, maxDistance)) {
-        randomIndex = Math.floor(Math.random() * possibleStepsIndex.length)
-      }
-    // while(!isStepPossible(position, randomIndex, maxDistance)) {
-    //   randomIndex = Math.floor(Math.random() * possibleStepsIndex.length)
-    //   }
+    let randomIndex;
+    do {
+      randomIndex = Math.floor(Math.random() * possibleStepsIndex.length);
+    } while(!isStepPossible(position, randomIndex, maxDistance) || !this.checkPosition(randomIndex));
     return randomIndex;
   }
 
@@ -202,19 +265,19 @@ export default class GameController {
     this.mouseEnterCell = null;
   }
 
-  toCharacterRemove(character){
+  async toCharacterRemove(character){
     this.positionsTeams = this.positionsTeams.filter(char => char !== character);
-    this.gamePlay.redrawPositions(this.positionsTeams);
+    await this.gamePlay.redrawPositions(this.positionsTeams);
     return;
   }
 
   toMouseenterCell(){
-    console.log(this.selectedCellIndex) // вылетает undefined ----------------------------------------------------------------------------
     this.gamePlay.cells.forEach(cell => cell.addEventListener("mouseenter", () => {
       const index = this.gamePlay.cells.indexOf(event.currentTarget);
       if (this.mouseEnterCell !== null) {
         this.gamePlay.deselectCell(this.mouseEnterCell);
       }
+      if (this.selectedCellIndex === null) return;
       this.gamePlay.selectCell(this.selectedCellIndex);
       this.mouseEnterCell = index;
       const character = this.positionsTeams.find(char => char.position === index);
@@ -287,21 +350,55 @@ export default class GameController {
     return `${emojiLevel} ${level} ${emojiAttak} ${attack} ${emojiDefence} ${defence} ${emojiHealth} ${health}`;
   }
 
-
-  levelUp(team){
+  levelUp(teamPlayers){
+    if(this.gameState.level === 4) {
+      return;
+    }
+    this.gameState.levelUp();
+    this.resetOptions()
+    this.team = null;
+    this.opponent = null;
     let levelUpCharacters =[];
-    team.forEach(character => {
-      console.log(character);
-      const updatedData = Mathematic.levelUp(character.character);
+    teamPlayers.forEach(character => {
+      character.character.level += 1;
+      const updatedData = Mathematic.levelUp(character.character, character.character.level);
       character.character.health = updatedData.health;
       character.character.attack = updatedData.attack;
       character.character.defence = updatedData.defence;
-      character.character.level += 1;
       levelUpCharacters.push(character)
     })
-
-      console.log(levelUpCharacters);
-
+    let playerCharacters = ['swordsman', 'bowman', 'magician'];
+    let opponentCharacters = ['undead', 'vampire', 'daemon'];
+    this.levelUpInit().then(() => {
+      this.positionsTeams.forEach(char => {
+        if (opponentCharacters.includes(char.character.type)){
+          char.character.level = this.gameState.level;
+          const updatedData = Mathematic.levelUp(char.character, this.gameState.level);
+          char.character.health = updatedData.health;
+          char.character.attack = updatedData.attack;
+          char.character.defence = updatedData.defence;
+        }
+      })
+      for (let i = 0; i < levelUpCharacters.length; i++) {
+        this.positionsTeams.forEach(char => {
+          if (playerCharacters.includes(char.character.type) && char.character.level === 1) {
+            const index = this.positionsTeams.indexOf(char)
+            const position = char.position;
+            this.positionsTeams.splice(index, 1)
+            levelUpCharacters[i].position = position
+            this.positionsTeams.push(levelUpCharacters[i])
+            return;
+          }
+        })
+      }
+      this.positionsTeams = this.positionsTeams.filter((char, index, self) =>
+        index === self.findIndex((c) => (
+          c.position === char.position
+        ))
+      );
+      this.gamePlay.redrawPositions(this.positionsTeams);
+      console.log(this.positionsTeams);
+      })
   }
 
   onCellEnter(index) {
